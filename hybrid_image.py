@@ -119,6 +119,47 @@ def subsample(img, size, sigma):
 
 #Alignment 1: Pixel Matching
 
+def shift_pixel(imgA, imgB, max_shift):
+    
+    grayA = color.rgb2gray(imgA)
+    grayB = color.rgb2gray(imgB)
+
+    H, W = grayA.shape
+
+    best_error = float('inf')
+    best_dx = 0
+    best_dy = 0
+
+    for dy in range(-max_shift, max_shift + 1):
+        for dx in range(-max_shift, max_shift + 1):
+
+            if dx >= 0:
+                A_x1, A_x2 = 0, W - dx
+                B_x1, B_x2 = dx, W
+            else:
+                A_x1, A_x2 = -dx, W
+                B_x1, B_x2 = 0, W + dx
+
+            if dy >= 0:
+                A_y1, A_y2 = 0, H - dy
+                B_y1, B_y2 = dy, H
+            else:
+                A_y1, A_y2 = -dy, H
+                B_y1, B_y2 = 0, H + dy
+
+            A = grayA[A_y1:A_y2, A_x1:A_x2]
+            B = grayB[B_y1:B_y2, B_x1:B_x2]
+
+            error = np.mean((A - B) ** 2)
+
+            if error < best_error:
+                best_error = error
+                best_dx = dx
+                best_dy = dy
+
+    return best_dx, best_dy
+
+
 #Alignment 2: Edge Detection
 
 def partial_x(img):
@@ -176,26 +217,16 @@ def gradient(img):
     Gy = partial_y(img)
 
     G = np.sqrt(Gx*Gx + Gy*Gy)
-    theta = np.arctan2(Gy, Gx)
-    theta = np.degrees(theta)
 
-    return G, theta
+    return G
 
 def shift_gradient(imgA, imgB, max_shift):
-    # Convert RGB images to grayscale
-    if len(imgA.shape) == 3:
-        grayA = color.rgb2gray(imgA)
-    else:
-        grayA = imgA
+    
+    grayA = color.rgb2gray(imgA)
+    grayB = color.rgb2gray(imgB)
 
-    if len(imgB.shape) == 3:
-        grayB = color.rgb2gray(imgB)
-    else:
-        grayB = imgB
-
-    # Compute gradient magnitude for each image
-    gradA, thetaA = gradient(grayA)
-    gradB, thetaB = gradient(grayB)
+    gradA = gradient(grayA)
+    gradB = gradient(grayB)
 
     H, W = grayA.shape
 
@@ -203,7 +234,6 @@ def shift_gradient(imgA, imgB, max_shift):
     best_dx = 0
     best_dy = 0
 
-    # Try every possible translation
     for dy in range(-max_shift, max_shift + 1):
         for dx in range(-max_shift, max_shift + 1):
 
@@ -221,11 +251,9 @@ def shift_gradient(imgA, imgB, max_shift):
                 A_y1, A_y2 = -dy, H
                 B_y1, B_y2 = 0, H + dy
 
-            # Get overlapping regions
             A = gradA[A_y1:A_y2, A_x1:A_x2]
             B = gradB[B_y1:B_y2, B_x1:B_x2]
 
-            # Compare gradient magnitudes
             error = np.mean((A - B) ** 2)
 
             if error < best_error:
@@ -234,6 +262,38 @@ def shift_gradient(imgA, imgB, max_shift):
                 best_dy = dy
 
     return best_dx, best_dy
+
+def shift_image(img, dx, dy):
+    shifted = np.zeros_like(img)
+
+    H,W = img.shape[:2]
+
+    if dx >= 0:
+        src_x1 = 0
+        src_x2 = W - dx
+        dst_x1 = dx
+        dst_x2 = W
+    else:
+        src_x1 = -dx
+        src_x2 = W
+        dst_x1 = 0
+        dst_x2 = W + dx
+
+    if dy >= 0:
+        src_y1 = 0
+        src_y2 = H - dy
+        dst_y1 = dy
+        dst_y2 = H
+    else:
+        src_y1 = -dy
+        src_y2 = H
+        dst_y1 = 0
+        dst_y2 = H + dy
+
+    shifted[dst_y1:dst_y2, dst_x1:dst_x2] = \
+        img[src_y1:src_y2, src_x1:src_x2]
+
+    return shifted
 
 folder_aligned = "dataset/aligned"
 
@@ -271,25 +331,24 @@ while escape == 0:
     print()
 
     if selection == "1":
-        escape2 = 0
-        while escape2 == 0:
+        while escape == 0:
             print("0. Go Back")
             print("1. Random Images")
             print("2. Select Images")
-            selection2 = input("Please select an option: ")
+            selection = input("Please select an option: ")
             print()
-            if selection2 == "1":
+            if selection == "1":
                 imgA, imgB = random.sample(images_aligned, 2)
                 imgA = np.array(Image.open(os.path.join(folder_aligned, imgA))).astype(float) / 255.0
                 imgB = np.array(Image.open(os.path.join(folder_aligned, imgB))).astype(float) / 255.0
 
-                low_sd = int(input("Select a sigma for image A/low-frequency: "))
-                high_sd = int(input("Select a sigma for image B/high frequency: "))
-                weight = int(input("Select a weight: "))
+                low_sd = float(input("Select a sigma for image A/low-frequency: "))
+                high_sd = float(input("Select a sigma for image B/high frequency: "))
+                weight = float(input("Select a weight: "))
 
                 lowA, highB, hybrid = hybrid_image(imgA,31,low_sd,imgB,31,high_sd,weight)
 
-                hybrid_subsample = subsample(hybrid, 10, 5)
+                hybrid_subsample = subsample(hybrid, 11, 5)
 
                 fig = plt.figure(figsize=(10, 4))
 
@@ -317,20 +376,20 @@ while escape == 0:
 
                 print()
                 continue
-            elif selection2 == "2":
+            elif selection == "2":
                 print("Select two numbers from 1-100 as 3 digits (EX: 021)")
                 imgA_selection = input("Select an image A number: ")
                 imgA = np.array(Image.open(os.path.join(folder_aligned, "face_0"+imgA_selection+".png"))).astype(float) / 255.0
                 imgB_selection = input("Select an image B number: ")
                 imgB = np.array(Image.open(os.path.join(folder_aligned, "face_0"+imgB_selection+".png"))).astype(float) / 255.0
 
-                low_sd = int(input("Select a sigma for image A/low-frequency: "))
-                high_sd = int(input("Select a sigma for image B/high frequency: "))
-                weight = int(input("Select a weight: "))
+                low_sd = float(input("Select a sigma for image A/low-frequency: "))
+                high_sd = float(input("Select a sigma for image B/high frequency: "))
+                weight = float(input("Select a weight: "))
 
                 lowA, highB, hybrid = hybrid_image(imgA,31,low_sd,imgB,31,high_sd,weight)
 
-                hybrid_subsample = subsample(hybrid, 10, 5)
+                hybrid_subsample = subsample(hybrid, 11, 5)
 
                 fig = plt.figure(figsize=(10, 4))
 
@@ -358,9 +417,455 @@ while escape == 0:
 
                 print()          
                 continue
+            elif selection == "0":
+                break
             else:
-                escape2 = 1
+                print("Invalid Selection. Please try again.")
+                continue
+
+    elif selection == "2":
+        while escape == 0:
+            print()
+            print("0. Go Back")
+            print("1. Easy")
+            print("2. Medium")
+            print("3. Large")
+            selection = input("Please select an alignment difficulty: ")
+            print()
+            if selection == "0":
+                break
+            elif selection == "1":
+                while escape == 0:
+                    print("0. Go Back")
+                    print("1. Random Images")
+                    print("2. Select Images")
+                    selection = input("Please select an option: ")
+                    print()
+                    if selection == "1":
+                        imgA, imgB = random.sample(images_easy, 2)
+                        imgA = np.array(Image.open(os.path.join(folder_aligned, imgA))).astype(float) / 255.0
+                        imgB = np.array(Image.open(os.path.join(folder_easy, imgB))).astype(float) / 255.0
+
+                        dx_pixel, dy_pixel = shift_pixel(imgA, imgB, 10)
+                        dx_gradient, dy_gradient = shift_gradient(imgA, imgB, 10)
+
+                        print("Pixel method:")
+                        print("dx =", dx_pixel, "dy =", dy_pixel)
+
+                        print("gradient method:")
+                        print("dx =", dx_gradient, "dy =", dy_gradient)
+
+                        alignB_pixel = shift_image(imgB, dx_pixel, dy_pixel)
+                        alignB_gradient =  shift_image(imgB, dx_gradient, dy_gradient)
+
+                        low_sd = float(input("Select a sigma for image A/low-frequency: "))
+                        high_sd = float(input("Select a sigma for image B/high frequency: "))
+                        weight = float(input("Select a weight: "))
+
+                        lowA, highB, hybrid_pixel = hybrid_image(imgA, 31, low_sd, alignB_pixel, 31, high_sd, weight)
+                        lowA, highB, hybrid_gradient = hybrid_image(imgA, 31, low_sd, alignB_gradient, 31, high_sd, weight)
+
+                        hybrid_pixel_subsample = subsample(hybrid_pixel, 11, 5)
+                        hybrid_gradient_subsample = subsample(hybrid_gradient, 11, 5)
+
+                        fig = plt.figure(figsize=(12, 4))
+
+                        ax1 = fig.add_axes([0.02, 0.15, 0.22, 0.7])
+                        ax1.imshow(lowA)
+                        ax1.set_title("lowA")
+                        ax1.axis("off")
+
+                        ax2 = fig.add_axes([0.20, 0.15, 0.22, 0.7])
+                        ax2.imshow(highB)
+                        ax2.set_title("highB")
+                        ax2.axis("off")
+
+                        ax3 = fig.add_axes([0.40, 0.15, 0.22, 0.7])
+                        ax3.imshow(hybrid_pixel)
+                        ax3.set_title("hybrid pixel big")
+                        ax3.axis("off")
+
+                        ax4 = fig.add_axes([0.62, 0.30, 0.07, 0.2])
+                        ax4.imshow(hybrid_pixel_subsample)
+                        ax4.set_title("hybrid pixel small")
+                        ax4.axis("off")
+
+                        ax5 = fig.add_axes([0.7, 0.15, 0.22, 0.7])
+                        ax5.imshow(hybrid_gradient)
+                        ax5.set_title("hybrid gradient big")
+                        ax5.axis("off")
+
+                        ax6 = fig.add_axes([0.95, 0.30, 0.07, 0.2])
+                        ax6.imshow(hybrid_gradient_subsample)
+                        ax6.set_title("hybrid gradient small")
+                        ax6.axis("off")
+
+                        
+                        plt.savefig("hybrid.png", bbox_inches="tight")
+
+                        print()
+                        continue
+                    elif selection == "2":
+                        print("Select two numbers from 1-100 as 3 digits (EX: 021)")
+                        imgA_selection = input("Select an image A number: ")
+                        imgA = np.array(Image.open(os.path.join(folder_aligned, "face_0"+imgA_selection+".png"))).astype(float) / 255.0
+                        imgB_selection = input("Select an image B number: ")
+                        imgB = np.array(Image.open(os.path.join(folder_easy, "face_0"+imgB_selection+".png"))).astype(float) / 255.0
+
+                        dx_pixel, dy_pixel = shift_pixel(imgA, imgB, 10)
+                        dx_gradient, dy_gradient = shift_gradient(imgA, imgB, 10)
+
+                        print("Pixel method:")
+                        print("dx =", dx_pixel, "dy =", dy_pixel)
+
+                        print("gradient method:")
+                        print("dx =", dx_gradient, "dy =", dy_gradient)
+
+                        alignB_pixel = shift_image(imgB, dx_pixel, dy_pixel)
+                        alignB_gradient =  shift_image(imgB, dx_gradient, dy_gradient)
+
+                        low_sd = float(input("Select a sigma for image A/low-frequency: "))
+                        high_sd = float(input("Select a sigma for image B/high frequency: "))
+                        weight = float(input("Select a weight: "))
+
+                        lowA, highB, hybrid_pixel = hybrid_image(imgA, 31, low_sd, alignB_pixel, 31, high_sd, weight)
+                        lowA, highB, hybrid_gradient = hybrid_image(imgA, 31, low_sd, alignB_gradient, 31, high_sd, weight)
+
+                        hybrid_pixel_subsample = subsample(hybrid_pixel, 11, 5)
+                        hybrid_gradient_subsample = subsample(hybrid_gradient, 11, 5)
+
+                        fig = plt.figure(figsize=(12, 4))
+
+                        ax1 = fig.add_axes([0.02, 0.15, 0.22, 0.7])
+                        ax1.imshow(lowA)
+                        ax1.set_title("lowA")
+                        ax1.axis("off")
+
+                        ax2 = fig.add_axes([0.20, 0.15, 0.22, 0.7])
+                        ax2.imshow(highB)
+                        ax2.set_title("highB")
+                        ax2.axis("off")
+
+                        ax3 = fig.add_axes([0.40, 0.15, 0.22, 0.7])
+                        ax3.imshow(hybrid_pixel)
+                        ax3.set_title("hybrid pixel big")
+                        ax3.axis("off")
+
+                        ax4 = fig.add_axes([0.62, 0.30, 0.07, 0.2])
+                        ax4.imshow(hybrid_pixel_subsample)
+                        ax4.set_title("hybrid pixel small")
+                        ax4.axis("off")
+
+                        ax5 = fig.add_axes([0.7, 0.15, 0.22, 0.7])
+                        ax5.imshow(hybrid_gradient)
+                        ax5.set_title("hybrid gradient big")
+                        ax5.axis("off")
+
+                        ax6 = fig.add_axes([0.95, 0.30, 0.07, 0.2])
+                        ax6.imshow(hybrid_gradient_subsample)
+                        ax6.set_title("hybrid gradient small")
+                        ax6.axis("off")
+
+                        
+                        plt.savefig("hybrid.png", bbox_inches="tight")
+
+                        print()
+                        continue
+                    elif selection == "0":
+                        break
+                    else:
+                        print("Invalid Selection. Please try again.")
+                        continue
+            elif selection == "2":
+                while escape == 0:
+                    print("0. Go Back")
+                    print("1. Random Images")
+                    print("2. Select Images")
+                    selection = input("Please select an option: ")
+                    print()
+                    if selection == "1":
+                        imgA, imgB = random.sample(images_medium, 2)
+                        imgA = np.array(Image.open(os.path.join(folder_aligned, imgA))).astype(float) / 255.0
+                        imgB = np.array(Image.open(os.path.join(folder_medium, imgB))).astype(float) / 255.0
+
+                        dx_pixel, dy_pixel = shift_pixel(imgA, imgB, 25)
+                        dx_gradient, dy_gradient = shift_gradient(imgA, imgB, 25)
+
+                        print("Pixel method:")
+                        print("dx =", dx_pixel, "dy =", dy_pixel)
+
+                        print("gradient method:")
+                        print("dx =", dx_gradient, "dy =", dy_gradient)
+
+                        alignB_pixel = shift_image(imgB, dx_pixel, dy_pixel)
+                        alignB_gradient =  shift_image(imgB, dx_gradient, dy_gradient)
+
+                        low_sd = float(input("Select a sigma for image A/low-frequency: "))
+                        high_sd = float(input("Select a sigma for image B/high frequency: "))
+                        weight = float(input("Select a weight: "))
+
+                        lowA, highB, hybrid_pixel = hybrid_image(imgA, 31, low_sd, alignB_pixel, 31, high_sd, weight)
+                        lowA, highB, hybrid_gradient = hybrid_image(imgA, 31, low_sd, alignB_gradient, 31, high_sd, weight)
+
+                        hybrid_pixel_subsample = subsample(hybrid_pixel, 11, 5)
+                        hybrid_gradient_subsample = subsample(hybrid_gradient, 11, 5)
+
+                        fig = plt.figure(figsize=(12, 4))
+
+                        ax1 = fig.add_axes([0.02, 0.15, 0.22, 0.7])
+                        ax1.imshow(lowA)
+                        ax1.set_title("lowA")
+                        ax1.axis("off")
+
+                        ax2 = fig.add_axes([0.20, 0.15, 0.22, 0.7])
+                        ax2.imshow(highB)
+                        ax2.set_title("highB")
+                        ax2.axis("off")
+
+                        ax3 = fig.add_axes([0.40, 0.15, 0.22, 0.7])
+                        ax3.imshow(hybrid_pixel)
+                        ax3.set_title("hybrid pixel big")
+                        ax3.axis("off")
+
+                        ax4 = fig.add_axes([0.62, 0.30, 0.07, 0.2])
+                        ax4.imshow(hybrid_pixel_subsample)
+                        ax4.set_title("hybrid pixel small")
+                        ax4.axis("off")
+
+                        ax5 = fig.add_axes([0.7, 0.15, 0.22, 0.7])
+                        ax5.imshow(hybrid_gradient)
+                        ax5.set_title("hybrid gradient big")
+                        ax5.axis("off")
+
+                        ax6 = fig.add_axes([0.95, 0.30, 0.07, 0.2])
+                        ax6.imshow(hybrid_gradient_subsample)
+                        ax6.set_title("hybrid gradient small")
+                        ax6.axis("off")
+
+                        
+                        plt.savefig("hybrid.png", bbox_inches="tight")
+
+                        print()
+                        continue
+                    elif selection == "2":
+                        print("Select two numbers from 1-100 as 3 digits (EX: 021)")
+                        imgA_selection = input("Select an image A number: ")
+                        imgA = np.array(Image.open(os.path.join(folder_aligned, "face_0"+imgA_selection+".png"))).astype(float) / 255.0
+                        imgB_selection = input("Select an image B number: ")
+                        imgB = np.array(Image.open(os.path.join(folder_medium, "face_0"+imgB_selection+".png"))).astype(float) / 255.0
+
+                        dx_pixel, dy_pixel = shift_pixel(imgA, imgB, 25)
+                        dx_gradient, dy_gradient = shift_gradient(imgA, imgB, 25)
+
+                        print("Pixel method:")
+                        print("dx =", dx_pixel, "dy =", dy_pixel)
+
+                        print("gradient method:")
+                        print("dx =", dx_gradient, "dy =", dy_gradient)
+
+                        alignB_pixel = shift_image(imgB, dx_pixel, dy_pixel)
+                        alignB_gradient =  shift_image(imgB, dx_gradient, dy_gradient)
+
+                        low_sd = float(input("Select a sigma for image A/low-frequency: "))
+                        high_sd = float(input("Select a sigma for image B/high frequency: "))
+                        weight = float(input("Select a weight: "))
+
+                        lowA, highB, hybrid_pixel = hybrid_image(imgA, 31, low_sd, alignB_pixel, 31, high_sd, weight)
+                        lowA, highB, hybrid_gradient = hybrid_image(imgA, 31, low_sd, alignB_gradient, 31, high_sd, weight)
+
+                        hybrid_pixel_subsample = subsample(hybrid_pixel, 11, 5)
+                        hybrid_gradient_subsample = subsample(hybrid_gradient, 11, 5)
+
+                        fig = plt.figure(figsize=(12, 4))
+
+                        ax1 = fig.add_axes([0.02, 0.15, 0.22, 0.7])
+                        ax1.imshow(lowA)
+                        ax1.set_title("lowA")
+                        ax1.axis("off")
+
+                        ax2 = fig.add_axes([0.20, 0.15, 0.22, 0.7])
+                        ax2.imshow(highB)
+                        ax2.set_title("highB")
+                        ax2.axis("off")
+
+                        ax3 = fig.add_axes([0.40, 0.15, 0.22, 0.7])
+                        ax3.imshow(hybrid_pixel)
+                        ax3.set_title("hybrid pixel big")
+                        ax3.axis("off")
+
+                        ax4 = fig.add_axes([0.62, 0.30, 0.07, 0.2])
+                        ax4.imshow(hybrid_pixel_subsample)
+                        ax4.set_title("hybrid pixel small")
+                        ax4.axis("off")
+
+                        ax5 = fig.add_axes([0.7, 0.15, 0.22, 0.7])
+                        ax5.imshow(hybrid_gradient)
+                        ax5.set_title("hybrid gradient big")
+                        ax5.axis("off")
+
+                        ax6 = fig.add_axes([0.95, 0.30, 0.07, 0.2])
+                        ax6.imshow(hybrid_gradient_subsample)
+                        ax6.set_title("hybrid gradient small")
+                        ax6.axis("off")
+
+                        
+                        plt.savefig("hybrid.png", bbox_inches="tight")
+
+                        print()
+                        continue
+                    elif selection == "0":
+                        break
+                    else:
+                        print("Invalid Selection. Please try again.")
+                        continue
+            elif selection == "3":
+                while escape == 0:
+                    print("0. Go Back")
+                    print("1. Random Images")
+                    print("2. Select Images")
+                    selection = input("Please select an option: ")
+                    print()
+                    if selection == "1":
+                        imgA, imgB = random.sample(images_large, 2)
+                        imgA = np.array(Image.open(os.path.join(folder_aligned, imgA))).astype(float) / 255.0
+                        imgB = np.array(Image.open(os.path.join(folder_large, imgB))).astype(float) / 255.0
+
+                        dx_pixel, dy_pixel = shift_pixel(imgA, imgB, 40)
+                        dx_gradient, dy_gradient = shift_gradient(imgA, imgB, 40)
+
+                        print("Pixel method:")
+                        print("dx =", dx_pixel, "dy =", dy_pixel)
+
+                        print("gradient method:")
+                        print("dx =", dx_gradient, "dy =", dy_gradient)
+
+                        alignB_pixel = shift_image(imgB, dx_pixel, dy_pixel)
+                        alignB_gradient =  shift_image(imgB, dx_gradient, dy_gradient)
+
+                        low_sd = float(input("Select a sigma for image A/low-frequency: "))
+                        high_sd = float(input("Select a sigma for image B/high frequency: "))
+                        weight = float(input("Select a weight: "))
+
+                        lowA, highB, hybrid_pixel = hybrid_image(imgA, 31, low_sd, alignB_pixel, 31, high_sd, weight)
+                        lowA, highB, hybrid_gradient = hybrid_image(imgA, 31, low_sd, alignB_gradient, 31, high_sd, weight)
+
+                        hybrid_pixel_subsample = subsample(hybrid_pixel, 11, 5)
+                        hybrid_gradient_subsample = subsample(hybrid_gradient, 11, 5)
+
+                        fig = plt.figure(figsize=(12, 4))
+
+                        ax1 = fig.add_axes([0.02, 0.15, 0.22, 0.7])
+                        ax1.imshow(lowA)
+                        ax1.set_title("lowA")
+                        ax1.axis("off")
+
+                        ax2 = fig.add_axes([0.20, 0.15, 0.22, 0.7])
+                        ax2.imshow(highB)
+                        ax2.set_title("highB")
+                        ax2.axis("off")
+
+                        ax3 = fig.add_axes([0.40, 0.15, 0.22, 0.7])
+                        ax3.imshow(hybrid_pixel)
+                        ax3.set_title("hybrid pixel big")
+                        ax3.axis("off")
+
+                        ax4 = fig.add_axes([0.62, 0.30, 0.07, 0.2])
+                        ax4.imshow(hybrid_pixel_subsample)
+                        ax4.set_title("hybrid pixel small")
+                        ax4.axis("off")
+
+                        ax5 = fig.add_axes([0.7, 0.15, 0.22, 0.7])
+                        ax5.imshow(hybrid_gradient)
+                        ax5.set_title("hybrid gradient big")
+                        ax5.axis("off")
+
+                        ax6 = fig.add_axes([0.95, 0.30, 0.07, 0.2])
+                        ax6.imshow(hybrid_gradient_subsample)
+                        ax6.set_title("hybrid gradient small")
+                        ax6.axis("off")
+
+                        
+                        plt.savefig("hybrid.png", bbox_inches="tight")
+
+                        print()
+                        continue
+                    elif selection == "2":
+                        print("Select two numbers from 1-100 as 3 digits (EX: 021)")
+                        imgA_selection = input("Select an image A number: ")
+                        imgA = np.array(Image.open(os.path.join(folder_aligned, "face_0"+imgA_selection+".png"))).astype(float) / 255.0
+                        imgB_selection = input("Select an image B number: ")
+                        imgB = np.array(Image.open(os.path.join(folder_large, "face_0"+imgB_selection+".png"))).astype(float) / 255.0
+
+                        dx_pixel, dy_pixel = shift_pixel(imgA, imgB, 40)
+                        dx_gradient, dy_gradient = shift_gradient(imgA, imgB, 40)
+
+                        print("Pixel method:")
+                        print("dx =", dx_pixel, "dy =", dy_pixel)
+
+                        print("gradient method:")
+                        print("dx =", dx_gradient, "dy =", dy_gradient)
+
+                        alignB_pixel = shift_image(imgB, dx_pixel, dy_pixel)
+                        alignB_gradient =  shift_image(imgB, dx_gradient, dy_gradient)
+
+                        low_sd = float(input("Select a sigma for image A/low-frequency: "))
+                        high_sd = float(input("Select a sigma for image B/high frequency: "))
+                        weight = float(input("Select a weight: "))
+
+                        lowA, highB, hybrid_pixel = hybrid_image(imgA, 31, low_sd, alignB_pixel, 31, high_sd, weight)
+                        lowA, highB, hybrid_gradient = hybrid_image(imgA, 31, low_sd, alignB_gradient, 31, high_sd, weight)
+
+                        hybrid_pixel_subsample = subsample(hybrid_pixel, 11, 5)
+                        hybrid_gradient_subsample = subsample(hybrid_gradient, 11, 5)
+
+                        fig = plt.figure(figsize=(12, 4))
+
+                        ax1 = fig.add_axes([0.02, 0.15, 0.22, 0.7])
+                        ax1.imshow(lowA)
+                        ax1.set_title("lowA")
+                        ax1.axis("off")
+
+                        ax2 = fig.add_axes([0.20, 0.15, 0.22, 0.7])
+                        ax2.imshow(highB)
+                        ax2.set_title("highB")
+                        ax2.axis("off")
+
+                        ax3 = fig.add_axes([0.40, 0.15, 0.22, 0.7])
+                        ax3.imshow(hybrid_pixel)
+                        ax3.set_title("hybrid pixel big")
+                        ax3.axis("off")
+
+                        ax4 = fig.add_axes([0.62, 0.30, 0.07, 0.2])
+                        ax4.imshow(hybrid_pixel_subsample)
+                        ax4.set_title("hybrid pixel small")
+                        ax4.axis("off")
+
+                        ax5 = fig.add_axes([0.7, 0.15, 0.22, 0.7])
+                        ax5.imshow(hybrid_gradient)
+                        ax5.set_title("hybrid gradient big")
+                        ax5.axis("off")
+
+                        ax6 = fig.add_axes([0.95, 0.30, 0.07, 0.2])
+                        ax6.imshow(hybrid_gradient_subsample)
+                        ax6.set_title("hybrid gradient small")
+                        ax6.axis("off")
+
+                        
+                        plt.savefig("hybrid.png", bbox_inches="tight")
+
+                        print()
+                        continue
+                    elif selection == "0":
+                        break
+                    else:
+                        print("Invalid Selection. Please try again.")
+                        continue                
+            else:
+                print("Invalid Selection. Please try again.")
+                continue
+
     elif selection == "0":
-        escape = 1
+        break
     else:
         print("Invalid Selection. Please try again.")
+        continue
