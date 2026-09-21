@@ -105,9 +105,15 @@ def gaussian_filter(img, size, sigma):
 def hybrid_image(imgA, sizeA, sigmaA, imgB, sizeB, sigmaB, alpha):
     lowA = gaussian_filter(imgA, sizeA, sigmaA)
     lowB = gaussian_filter(imgB, sizeB, sigmaB)
-    highB = imgB = lowB
+    highB = imgB - lowB
     hybrid = lowA + alpha*highB
     return lowA, highB, hybrid
+
+def subsample(img, size, sigma):
+    blurred = gaussian_filter(img, size, sigma)
+    subsampled = blurred[::2, ::2]
+    return subsampled
+
 
 # PART 2 ##############################################################
 
@@ -229,24 +235,132 @@ def shift_gradient(imgA, imgB, max_shift):
 
     return best_dx, best_dy
 
-folder = "Dataset/easy"
+folder_aligned = "dataset/aligned"
 
-images = [
-    f for f in os.listdir(folder)
+images_aligned = [
+    f for f in os.listdir(folder_aligned)
 ]
 
-imgA, imgB = random.sample(images, 2)
+folder_easy = "dataset/easy"
 
-imgA = np.array(Image.open(os.path.join(folder, imgA))).astype(float) / 255.0
-plt.savefig("test1.png", bbox_inches="tight")
-imgB = np.array(Image.open(os.path.join(folder, imgB))).astype(float) / 255.0
-plt.savefig("test2.png", bbox_inches="tight")
+images_easy = [
+    f for f in os.listdir(folder_easy)
+]
 
-print("Image A:", imgA)
-print("Image B:", imgB)
+folder_large = "dataset/large"
 
+images_large = [
+    f for f in os.listdir(folder_large)
+]
 
-dx2, dy2 = shift_gradient(imgA, imgB, max_shift=20)
+folder_medium = "dataset/medium"
 
-print("Gradient-based method:")
-print("dx =", dx2, "dy =", dy2)
+images_medium = [
+    f for f in os.listdir(folder_medium)
+]
+
+escape = 0
+while escape == 0:
+    print()
+    print("Welcome to Hybrid Images and Alignment")
+    print()
+    print("0. Exit")
+    print("1. Pre-Aligned Images")
+    print("2. Un-Aligned Images")
+    selection = input("Please select a function: ")
+    print()
+
+    if selection == "1":
+        escape2 = 0
+        while escape2 == 0:
+            print("0. Go Back")
+            print("1. Random Images")
+            print("2. Select Images")
+            selection2 = input("Please select an option: ")
+            print()
+            if selection2 == "1":
+                imgA, imgB = random.sample(images_aligned, 2)
+                imgA = np.array(Image.open(os.path.join(folder_aligned, imgA))).astype(float) / 255.0
+                imgB = np.array(Image.open(os.path.join(folder_aligned, imgB))).astype(float) / 255.0
+
+                low_sd = int(input("Select a sigma for image A/low-frequency: "))
+                high_sd = int(input("Select a sigma for image B/high frequency: "))
+                weight = int(input("Select a weight: "))
+
+                lowA, highB, hybrid = hybrid_image(imgA,31,low_sd,imgB,31,high_sd,weight)
+
+                hybrid_subsample = subsample(hybrid, 10, 5)
+
+                fig = plt.figure(figsize=(10, 4))
+
+                ax1 = fig.add_axes([0.02, 0.15, 0.22, 0.7])
+                ax1.imshow(lowA)
+                ax1.set_title("lowA")
+                ax1.axis("off")
+
+                ax2 = fig.add_axes([0.26, 0.15, 0.22, 0.7])
+                ax2.imshow(highB)
+                ax2.set_title("highB")
+                ax2.axis("off")
+
+                ax3 = fig.add_axes([0.50, 0.15, 0.22, 0.7])
+                ax3.imshow(hybrid)
+                ax3.set_title("hybrid big")
+                ax3.axis("off")
+
+                ax4 = fig.add_axes([0.78, 0.30, 0.07, 0.2])
+                ax4.imshow(hybrid_subsample)
+                ax4.set_title("hybrid small")
+                ax4.axis("off")
+                
+                plt.savefig("hybrid.png", bbox_inches="tight")
+
+                print()
+                continue
+            elif selection2 == "2":
+                print("Select two numbers from 1-100 as 3 digits (EX: 021)")
+                imgA_selection = input("Select an image A number: ")
+                imgA = np.array(Image.open(os.path.join(folder_aligned, "face_0"+imgA_selection+".png"))).astype(float) / 255.0
+                imgB_selection = input("Select an image B number: ")
+                imgB = np.array(Image.open(os.path.join(folder_aligned, "face_0"+imgB_selection+".png"))).astype(float) / 255.0
+
+                low_sd = int(input("Select a sigma for image A/low-frequency: "))
+                high_sd = int(input("Select a sigma for image B/high frequency: "))
+                weight = int(input("Select a weight: "))
+
+                lowA, highB, hybrid = hybrid_image(imgA,31,low_sd,imgB,31,high_sd,weight)
+
+                hybrid_subsample = subsample(hybrid, 10, 5)
+
+                fig = plt.figure(figsize=(10, 4))
+
+                ax1 = fig.add_axes([0.02, 0.15, 0.22, 0.7])
+                ax1.imshow(lowA)
+                ax1.set_title("lowA")
+                ax1.axis("off")
+
+                ax2 = fig.add_axes([0.26, 0.15, 0.22, 0.7])
+                ax2.imshow(highB)
+                ax2.set_title("highB")
+                ax2.axis("off")
+
+                ax3 = fig.add_axes([0.50, 0.15, 0.22, 0.7])
+                ax3.imshow(hybrid)
+                ax3.set_title("hybrid big")
+                ax3.axis("off")
+
+                ax4 = fig.add_axes([0.78, 0.30, 0.07, 0.2])
+                ax4.imshow(hybrid_subsample)
+                ax4.set_title("hybrid small")
+                ax4.axis("off")
+                
+                plt.savefig("hybrid.png", bbox_inches="tight")
+
+                print()          
+                continue
+            else:
+                escape2 = 1
+    elif selection == "0":
+        escape = 1
+    else:
+        print("Invalid Selection. Please try again.")
