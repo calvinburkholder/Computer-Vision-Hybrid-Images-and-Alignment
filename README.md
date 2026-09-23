@@ -27,6 +27,9 @@ This selects the face of the base photo that has not been shifted. Must be input
 --num2:
 This selects the face that has been shifted. Must be input as a three digit number between 001 and 100
 
+--method:
+This selects the method of alignment that will be used to calculate the estimated shift. Options include: pixel, nms, both. Defaults to both if no input.
+
 --low-sd: 
 allows for the changing of the Gaussian standard deviation used for the low frequency component. Defaults to 5 if no input.
 
@@ -47,12 +50,17 @@ Expected Input/Output:
 
 Example parser input:
 
-$ python3 hybrid_image.py --diff easy --num1 001 --num2 002 --low-sd 6 --high-sd 4 --weight 2 --max-shift 10 --out test.png
+$ python3 hybrid_image.py --diff easy --num1 001 --num2 002 
+--method both --low-sd 6 --high-sd 4 --weight 2 --max-shift 10 --out test.png
 
 Output:
 The output consists of two objects
 
-1. The output image within the file expressed in --out (or in hybrid.png if not expressed). This consists of the low-frequency and high-frequency image seperated, and the hybrid images produced from the two alignment methods at two different scales, big and small.
+1. The output image within the file expressed in --out (or in hybrid.png if not expressed). This consists of the low-frequency and high-frequency image seperated, and the hybrid image produced from the selected alignment method, or both, at two different scales, big and small.
 
-2. The terminal will spit out a text based summary of the statistics of the difficulty, the two numbered images used, the estimated shift found from both methods, and the outpath of the image.
+2. The terminal will spit out a text based summary of the statistics of the difficulty, the two numbered images used, method, the estimated shift found from both methods (none for method not used, if only one), and the outpath of the image.
+
+How to reproduce my main experiments:
+
+
 
