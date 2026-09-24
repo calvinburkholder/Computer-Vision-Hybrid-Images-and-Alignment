@@ -117,51 +117,176 @@ def subsample(img, sigma):
     blurred = gaussian_filter(img, size, sigma)
     subsampled = blurred[::2, ::2]
     return subsampled
- 
- 
+
 # ---------------------------------------------------------------------------
 # PART 2: Alignment
 # ---------------------------------------------------------------------------
- 
-def shift_pixel(imgA, imgB, max_shift):
-    
-    grayA = color.rgb2gray(imgA)
-    grayB = color.rgb2gray(imgB)
 
-    H, W = grayA.shape
+def normalize_image(img):
 
-    best_error = float('inf')
-    best_dx = 0
-    best_dy = 0
+    mean = np.mean(img)
+    std = np.std(img)
 
-    for dy in range(-max_shift, max_shift + 1):
-        for dx in range(-max_shift, max_shift + 1):
+    if std < 1e-8:
+        return img - mean
 
-            if dx >= 0:
-                A_x1, A_x2 = 0, W - dx
-                B_x1, B_x2 = dx, W
-            else:
-                A_x1, A_x2 = -dx, W
-                B_x1, B_x2 = 0, W + dx
+    return (img - mean) / std
 
-            if dy >= 0:
-                A_y1, A_y2 = 0, H - dy
-                B_y1, B_y2 = dy, H
-            else:
-                A_y1, A_y2 = -dy, H
-                B_y1, B_y2 = 0, H + dy
 
-            A = grayA[A_y1:A_y2, A_x1:A_x2]
-            B = grayB[B_y1:B_y2, B_x1:B_x2]
+def get_overlap(A, B, dx, dy):
 
-            error = np.mean((A - B) ** 2)
+    H, W = A.shape
 
-            if error < best_error:
-                best_error = error
+    if dx >= 0:
+        Ax1, Ax2 = 0, W - dx
+        Bx1, Bx2 = dx, W
+    else:
+        Ax1, Ax2 = -dx, W
+        Bx1, Bx2 = 0, W + dx
+
+    if dy >= 0:
+        Ay1, Ay2 = 0, H - dy
+        By1, By2 = dy, H
+    else:
+        Ay1, Ay2 = -dy, H
+        By1, By2 = 0, H + dy
+
+    return (
+        A[Ay1:Ay2, Ax1:Ax2],
+        B[By1:By2, Bx1:Bx2]
+    )
+
+
+def correlation_score(A, B):
+
+    A = A - np.mean(A)
+    B = B - np.mean(B)
+
+    denominator = np.sqrt(np.sum(A * A) * np.sum(B * B))
+
+    if denominator < 1e-8:
+        return -1.0
+
+    return np.sum(A * B) / denominator
+
+
+def central_face_region(img, fraction=0.8):
+
+    H, W = img.shape
+
+    h = int(H * fraction)
+    w = int(W * fraction)
+
+    y1 = (H - h) // 2
+    x1 = (W - w) // 2
+
+    return img[y1:y1+h, x1:x1+w]
+
+
+def build_pyramid(img, levels=3):
+
+    pyramid = [img]
+
+    for _ in range(1, levels):
+        blurred = gaussian_filter(
+            pyramid[-1],
+            kernel_size_for_sigma(1.0),
+            1.0
+        )
+
+        pyramid.append(blurred[::2, ::2])
+
+    return pyramid[::-1]
+
+
+def search_alignment(A, B, max_shift, score_function,
+                     initial_dx=0, initial_dy=0, radius=None):
+
+    best_score = -float("inf")
+    best_dx = initial_dx
+    best_dy = initial_dy
+
+    if radius is None:
+        dx_range = range(-max_shift, max_shift + 1)
+        dy_range = range(-max_shift, max_shift + 1)
+    else:
+        dx_range = range(
+            initial_dx - radius,
+            initial_dx + radius + 1
+        )
+        dy_range = range(
+            initial_dy - radius,
+            initial_dy + radius + 1
+        )
+
+    for dy in dy_range:
+        for dx in dx_range:
+
+            if abs(dx) >= A.shape[1] or abs(dy) >= A.shape[0]:
+                continue
+
+            A_overlap, B_overlap = get_overlap(A, B, dx, dy)
+
+            if A_overlap.size == 0 or B_overlap.size == 0:
+                continue
+
+            score = score_function(A_overlap, B_overlap)
+
+            if score > best_score:
+                best_score = score
                 best_dx = dx
                 best_dy = dy
 
-    return best_dx, best_dy
+    return best_dx, best_dy, best_score
+
+
+def shift_pixel(imgA, imgB, max_shift):
+
+    grayA = color.rgb2gray(imgA)
+    grayB = color.rgb2gray(imgB)
+
+    grayA = central_face_region(grayA, 0.8)
+    grayB = central_face_region(grayB, 0.8)
+
+    grayA = normalize_image(grayA)
+    grayB = normalize_image(grayB)
+
+    pyramidA = build_pyramid(grayA, levels=3)
+    pyramidB = build_pyramid(grayB, levels=3)
+
+    dx = 0
+    dy = 0
+
+    for level in range(len(pyramidA)):
+
+        A = pyramidA[level]
+        B = pyramidB[level]
+
+        if level == 0:
+            level_max_shift = max(1, max_shift // 4)
+
+            dx, dy, _ = search_alignment(
+                A,
+                B,
+                level_max_shift,
+                correlation_score
+            )
+
+        else:
+            dx *= 2
+            dy *= 2
+
+            dx, dy, _ = search_alignment(
+                A,
+                B,
+                max_shift=0,
+                score_function=correlation_score,
+                initial_dx=dx,
+                initial_dy=dy,
+                radius=3
+            )
+
+    return dx, dy
 
 
 #Alignment 2: Edge Detection
@@ -214,6 +339,7 @@ def gradient(img):
     Hints:
         - Use np.sqrt and np.arctan2 to calculate square root and arctan
     """
+
     G = np.zeros(img.shape)
     theta = np.zeros(img.shape)
 
@@ -324,6 +450,59 @@ def shift_nms(imgA, imgB, max_shift):
 
     return best_dx, best_dy
 
+def shift_gradient(imgA, imgB, max_shift):
+
+    grayA = color.rgb2gray(imgA)
+    grayB = color.rgb2gray(imgB)
+
+    grayA = central_face_region(grayA, 0.8)
+    grayB = central_face_region(grayB, 0.8)
+
+    edgeA,_ = gradient(grayA)
+    edgeB,_ = gradient(grayB)
+
+    edgeA = normalize_image(edgeA)
+    edgeB = normalize_image(edgeB)
+
+    pyramidA = build_pyramid(edgeA, levels=3)
+    pyramidB = build_pyramid(edgeB, levels=3)
+
+    dx = 0
+    dy = 0
+
+    for level in range(len(pyramidA)):
+
+        A = pyramidA[level]
+        B = pyramidB[level]
+
+        if level == 0:
+
+            level_max_shift = max(1, max_shift // 4)
+
+            dx, dy, _ = search_alignment(
+                A,
+                B,
+                level_max_shift,
+                correlation_score
+            )
+
+        else:
+
+            dx *= 2
+            dy *= 2
+
+            dx, dy, _ = search_alignment(
+                A,
+                B,
+                max_shift=0,
+                score_function=correlation_score,
+                initial_dx=dx,
+                initial_dy=dy,
+                radius=3
+            )
+
+    return dx, dy
+
 def shift_image(img, dx, dy):
     shifted = np.zeros_like(img)
 
@@ -365,10 +544,6 @@ def _load(folder, num):
     return np.array(Image.open(path)).astype(float) / 255.0
  
  
-def _list_images(folder):
-    return sorted(f for f in os.listdir(folder))
- 
- 
 def _aligned_folder():
     return os.path.join(DATASET_ROOT, "aligned")
  
@@ -382,9 +557,9 @@ def _difficulty_folder(difficulty):
 def run_alignment_experiment(diff, num1, num2, low_sd, high_sd, weight,
                               max_shift=None, method="both", out_path="hybrid.png"):
 
-    assert method in ("pixel", "nms", "both"), f"method must be 'pixel', 'nms', or 'both', got {method!r}"
+    assert method in ("pixel", "grad", "both"), f"method must be 'pixel', 'grad', or 'both', got {method!r}"
     use_pixel = method in ("pixel", "both")
-    use_nms = method in ("nms", "both")
+    use_grad = method in ("grad", "both")
  
     if max_shift is None:
         max_shift = DIFFICULTIES[diff]
@@ -392,7 +567,7 @@ def run_alignment_experiment(diff, num1, num2, low_sd, high_sd, weight,
     imgA = _load(_aligned_folder(), num1)
     imgB = _load(_difficulty_folder(diff), num2)
  
-    dx_pixel = dy_pixel = dx_nms = dy_nms = None
+    dx_pixel = dy_pixel = dx_grad = dy_grad = None
     lowA = highB = None
     panels = []
  
@@ -406,16 +581,16 @@ def run_alignment_experiment(diff, num1, num2, low_sd, high_sd, weight,
             (hybrid_pixel_small, "hybrid (pixel) small"),
         ]
  
-    if use_nms:
-        dx_nms, dy_nms = shift_nms(imgA, imgB, max_shift)
-        alignB_nms = shift_image(imgB, -dx_nms, -dy_nms)
-        lowA2, highB2, hybrid_nms = hybrid_image(imgA, low_sd, alignB_nms, high_sd, weight)
-        if lowA is None:  # method="nms" only -- pixel branch didn't run
+    if use_grad:
+        dx_grad, dy_grad = shift_gradient(imgA, imgB, max_shift)
+        alignB_grad = shift_image(imgB, -dx_grad, -dy_grad)
+        lowA2, highB2, hybrid_grad = hybrid_image(imgA, low_sd, alignB_grad, high_sd, weight)
+        if lowA is None: 
             lowA, highB = lowA2, highB2
-        hybrid_nms_small = subsample(hybrid_nms, sigma=5)
+        hybrid_grad_small = subsample(hybrid_grad, sigma=5)
         panels += [
-            (hybrid_nms, "hybrid (NMS-edge-aligned)"),
-            (hybrid_nms_small, "hybrid (NMS) small"),
+            (hybrid_grad, "hybrid (grad-aligned)"),
+            (hybrid_grad_small, "hybrid (grad) small"),
         ]
  
     panels = [(lowA, "lowA"), (highB, "highB")] + panels
@@ -433,7 +608,7 @@ def run_alignment_experiment(diff, num1, num2, low_sd, high_sd, weight,
     panel_h_inch = [img.shape[0] * panel_scale(title) for img, title in panels]
  
     fig_w = sum(panel_w_inch) + pad_inch * (len(panels) + 1)
-    fig_h = max(panel_h_inch) + title_pad_inch + 0.6  # + room for suptitle
+    fig_h = max(panel_h_inch) + title_pad_inch + 0.6
  
     fig = plt.figure(figsize=(fig_w, fig_h))
  
@@ -442,7 +617,7 @@ def run_alignment_experiment(diff, num1, num2, low_sd, high_sd, weight,
         left = x / fig_w
         width = w_inch / fig_w
         height = h_inch / fig_h
-        bottom = 0.08  # baseline-align all panels along the bottom
+        bottom = 0.08 
  
         ax = fig.add_axes([left, bottom, width, height])
         ax.imshow(np.clip(img, 0, 1))
@@ -454,8 +629,8 @@ def run_alignment_experiment(diff, num1, num2, low_sd, high_sd, weight,
     shift_parts = []
     if use_pixel:
         shift_parts.append(f"pixel dx,dy=({dx_pixel},{dy_pixel})")
-    if use_nms:
-        shift_parts.append(f"nms dx,dy=({dx_nms},{dy_nms})")
+    if use_grad:
+        shift_parts.append(f"grad dx,dy=({dx_grad},{dy_grad})")
     fig.suptitle(
         f"{diff}/{num1, num2}  |  " + "  ".join(shift_parts),
         fontsize=10,
@@ -468,7 +643,7 @@ def run_alignment_experiment(diff, num1, num2, low_sd, high_sd, weight,
         "num1": num1,
         "num2": num2,
         "dx_pixel": dx_pixel, "dy_pixel": dy_pixel,
-        "dx_nms": dx_nms, "dy_nms": dy_nms,
+        "dx_grad": dx_grad, "dy_grad": dy_grad,
         "out_path": out_path,
     }
 
@@ -478,7 +653,7 @@ if __name__ == "__main__":
     parser.add_argument("--diff", choices=DIFFICULTIES.keys())
     parser.add_argument("--num1")
     parser.add_argument("--num2")
-    parser.add_argument("--method", choices=["pixel", "nms", "both"], default="both")
+    parser.add_argument("--method", choices=["pixel", "grad", "both"], default="both")
     parser.add_argument("--low-sd", type=float, default=5.0)
     parser.add_argument("--high-sd", type=float, default=5.0)
     parser.add_argument("--weight", type=float, default=1.0)
